@@ -198,34 +198,76 @@ def load_gtfs_data(force_refresh=False):
     create_tables_if_not_exist()
 
     if force_refresh or st.session_state.last_refresh is None or (now > refresh_time and (st.session_state.last_refresh is None or st.session_state.last_refresh < refresh_time)):
-        with st.spinner("Downloading and processing GTFS data..."):
-            zip_obj = download_gtfs()
-            if not zip_obj:
-                return
+        # Create a progress bar
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        # Step 1: Download GTFS data (10%)
+        status_text.text("Downloading GTFS data...")
+        zip_obj = download_gtfs()
+        if not zip_obj:
+            progress_bar.empty()
+            status_text.empty()
+            return
+        progress_bar.progress(10)
+        
+        # Step 2: Extract data files (50%)
+        status_text.text("Extracting GTFS files...")
+        routes_df = extract_file(zip_obj, "routes.txt")
+        progress_bar.progress(20)
+        
+        stops_df = extract_file(zip_obj, "stops.txt")
+        progress_bar.progress(30)
+        
+        trips_df = extract_file(zip_obj, "trips.txt")
+        progress_bar.progress(40)
+        
+        stop_times_df = extract_file(zip_obj, "stop_times.txt")
+        progress_bar.progress(50)
+        
+        shapes_df = extract_file(zip_obj, "shapes.txt")
+        progress_bar.progress(60)
 
-            # Extract data files
-            routes_df = extract_file(zip_obj, "routes.txt")
-            stops_df = extract_file(zip_obj, "stops.txt")
-            trips_df = extract_file(zip_obj, "trips.txt")
-            stop_times_df = extract_file(zip_obj, "stop_times.txt")
-            shapes_df = extract_file(zip_obj, "shapes.txt")
+        # Step 3: Process data (70%)
+        status_text.text("Processing GTFS data...")
+        if not stops_df.empty and 'stop_lat' in stops_df.columns and 'stop_lon' in stops_df.columns:
+            # Apply region classification
+            stops_df["region"] = stops_df.apply(
+                lambda row: classify_region(row["stop_lat"], row["stop_lon"]), 
+                axis=1
+            )
+        progress_bar.progress(70)
 
-            # Process stops data to add region
-            if not stops_df.empty and 'stop_lat' in stops_df.columns and 'stop_lon' in stops_df.columns:
-                # Apply region classification
-                stops_df["region"] = stops_df.apply(
-                    lambda row: classify_region(row["stop_lat"], row["stop_lon"]), 
-                    axis=1
-                )
-
-            # Store data to PostgreSQL
-            store_to_postgres("gtfs_routes", routes_df)
-            store_to_postgres("gtfs_stops", stops_df)
-            store_to_postgres("gtfs_trips", trips_df)
-            store_to_postgres("gtfs_stop_times", stop_times_df)
-            store_to_postgres("gtfs_shapes", shapes_df)
-
-            st.session_state.last_refresh = now
+        # Step 4: Store data to PostgreSQL (100%)
+        status_text.text("Storing data to PostgreSQL...")
+        store_to_postgres("gtfs_routes", routes_df)
+        progress_bar.progress(75)
+        
+        store_to_postgres("gtfs_stops", stops_df)
+        progress_bar.progress(80)
+        
+        store_to_postgres("gtfs_trips", trips_df)
+        progress_bar.progress(85)
+        
+        store_to_postgres("gtfs_stop_times", stop_times_df)
+        progress_bar.progress(95)
+        
+        store_to_postgres("gtfs_shapes", shapes_df)
+        progress_bar.progress(100)
+        
+        # Update last refresh time
+        st.session_state.last_refresh = now
+        
+        # Display completion message
+        status_text.text("Data refresh completed successfully!")
+        
+        # Clear progress bar after 3 seconds
+        time.sleep(3)
+        progress_bar.empty()
+        status_text.empty()
+        
+        # Show success message
+        st.success(f"GTFS data successfully refreshed at {now.strftime('%Y-%m-%d %H:%M:%S')}")
     else:
         st.info(f"GTFS data already refreshed today at {st.session_state.last_refresh.strftime('%Y-%m-%d %H:%M:%S')}.")
 
