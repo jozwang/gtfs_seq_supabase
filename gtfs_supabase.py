@@ -9,12 +9,7 @@ import psycopg2
 from psycopg2.extras import execute_values
 
 # --- PostgreSQL Connection ---
-PG_HOST = "eegejlqdgahlmtjniupz.supabase.co"
-PG_PORT = 5432
-PG_DB = "GTFS"
-PG_USER = "postgres"
-PG_PASSWORD = "Supa1base!gtfs"  # Enter your actual DB password here
-
+SUPABASE_URL = st.secrets.get("SUPABASE_DATABASE_URL")
 # --- GTFS Static Data URL ---
 GTFS_ZIP_URL = "https://www.data.qld.gov.au/dataset/general-transit-feed-specification-gtfs-translink/resource/e43b6b9f-fc2b-4630-a7c9-86dd5483552b/download"
 
