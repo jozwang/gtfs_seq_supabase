@@ -6,14 +6,10 @@ import os
 from urllib.parse import urlparse
 
 # --- Supabase Connection Options ---
-# Option 1: Connection URL with service role (preferred)
-# SUPABASE_URL = "postgresql://postgres.eegejlqdgahlmtjniupz:Supa1base!@aws-0-us-west-1.pooler.supabase.com:5432/postgres"
-# Note: Replace the password in the URL with your actual service role key or use environment variables
 
 # Option 2: Connection string with service role from environment variables
 SUPABASE_URL = st.secrets.get("SUPABASE_DATABASE_URL")
 #os.environ.get("SUPABASE_DATABASE_URL", "")
-#SUPABASE_URL = "postgresql://postgres.eegejlqdgahlmtjniupz:Supa1base!gtfs@aws-0-ap-southeast-2.pooler.supabase.com:6543/postgres"
 
 
 # --- Function to get connection with timeout ---
