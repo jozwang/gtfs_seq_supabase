@@ -14,8 +14,20 @@ SUPABASE_URL = st.secrets.get("SUPABASE_DATABASE_URL")
 GTFS_ZIP_URL = "https://www.data.qld.gov.au/dataset/general-transit-feed-specification-gtfs-translink/resource/e43b6b9f-fc2b-4630-a7c9-86dd5483552b/download"
 
 def get_pg_connection():
-    return  psycopg2.connect(SUPABASE_URL)
-    
+    try:
+        # Connect using the connection URL
+        conn = psycopg2.connect(
+            SUPABASE_URL,
+            connect_timeout=5
+        )
+        return conn
+    except psycopg2.OperationalError as e:
+        st.error(f"Connection failed (operational error): {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Connection failed (unexpected error): {str(e)}")
+        st.error(traceback.format_exc())
+        return None
 
 def download_gtfs():
     try:
