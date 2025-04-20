@@ -30,7 +30,7 @@ def get_pg_connection():
 
 def download_gtfs():
     try:
-        response = requests.get(GTFS_ZIP_URL, timeout=10)
+        response = requests.get(GTFS_ZIP_URL, timeout=30)  # Increased timeout
         response.raise_for_status()
         return zipfile.ZipFile(io.BytesIO(response.content))
     except requests.RequestException as e:
@@ -41,35 +41,142 @@ def extract_file(zip_obj, filename):
     try:
         with zip_obj.open(filename) as file:
             return pd.read_csv(file, dtype=str, low_memory=False)
+    except KeyError as e:
+        st.warning(f"File {filename} not found in GTFS package: {e}")
+        return pd.DataFrame()
     except Exception as e:
         st.warning(f"Could not read {filename}: {e}")
         return pd.DataFrame()
 
 def classify_region(lat, lon):
-    lat, lon = float(lat), float(lon)
-    if -28.2 <= lat <= -27.8 and 153.2 <= lon <= 153.5:
-        return "Gold Coast"
-    elif -27.7 <= lat <= -27.2 and 152.8 <= lon <= 153.5:
-        return "Brisbane"
-    elif -27.2 <= lat <= -26.3 and 152.8 <= lon <= 153.3:
-        return "Sunshine Coast"
-    else:
-        return "Other"
+    try:
+        lat, lon = float(lat), float(lon)
+        if -28.2 <= lat <= -27.8 and 153.2 <= lon <= 153.5:
+            return "Gold Coast"
+        elif -27.7 <= lat <= -27.2 and 152.8 <= lon <= 153.5:
+            return "Brisbane"
+        elif -27.2 <= lat <= -26.3 and 152.8 <= lon <= 153.3:
+            return "Sunshine Coast"
+        else:
+            return "Other"
+    except (ValueError, TypeError):
+        return "Unknown"
+
+def create_tables_if_not_exist():
+    conn = get_pg_connection()
+    cursor = conn.cursor()
+    try:
+        # Create tables if they don't exist
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS gtfs_routes (
+                route_id TEXT PRIMARY KEY,
+                agency_id TEXT,
+                route_short_name TEXT,
+                route_long_name TEXT,
+                route_desc TEXT,
+                route_type TEXT,
+                route_url TEXT,
+                route_color TEXT,
+                route_text_color TEXT
+            );
+        """)
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS gtfs_stops (
+                stop_id TEXT PRIMARY KEY,
+                stop_code TEXT,
+                stop_name TEXT,
+                stop_desc TEXT,
+                stop_lat TEXT,
+                stop_lon TEXT,
+                zone_id TEXT,
+                stop_url TEXT,
+                location_type TEXT,
+                parent_station TEXT,
+                stop_timezone TEXT,
+                wheelchair_boarding TEXT,
+                platform_code TEXT,
+                region TEXT
+            );
+        """)
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS gtfs_trips (
+                route_id TEXT,
+                service_id TEXT,
+                trip_id TEXT PRIMARY KEY,
+                trip_headsign TEXT,
+                trip_short_name TEXT,
+                direction_id TEXT,
+                block_id TEXT,
+                shape_id TEXT,
+                wheelchair_accessible TEXT,
+                bikes_allowed TEXT
+            );
+        """)
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS gtfs_stop_times (
+                trip_id TEXT,
+                arrival_time TEXT,
+                departure_time TEXT,
+                stop_id TEXT,
+                stop_sequence TEXT,
+                stop_headsign TEXT,
+                pickup_type TEXT,
+                drop_off_type TEXT,
+                shape_dist_traveled TEXT,
+                timepoint TEXT,
+                PRIMARY KEY (trip_id, stop_sequence)
+            );
+        """)
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS gtfs_shapes (
+                shape_id TEXT,
+                shape_pt_lat TEXT,
+                shape_pt_lon TEXT,
+                shape_pt_sequence TEXT,
+                shape_dist_traveled TEXT,
+                PRIMARY KEY (shape_id, shape_pt_sequence)
+            );
+        """)
+        
+        conn.commit()
+    except Exception as e:
+        st.error(f"Error creating tables: {e}")
+        conn.rollback()
+    finally:
+        cursor.close()
+        conn.close()
 
 def store_to_postgres(table_name, df):
     if df.empty:
+        st.warning(f"No data to store in {table_name}")
         return
 
     conn = get_pg_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute(f"DELETE FROM {table_name};")
-        columns = list(df.columns)
-        values = df[columns].values.tolist()
-        insert_query = f"INSERT INTO {table_name} ({','.join(columns)}) VALUES %s"
+        cursor.execute(f"TRUNCATE TABLE {table_name};")  # Use TRUNCATE instead of DELETE for better performance
+        
+        # Filter columns to match the table schema
+        cursor.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}' ORDER BY ordinal_position;")
+        db_columns = [col[0] for col in cursor.fetchall()]
+        
+        # Only use columns that exist in the database
+        valid_columns = [col for col in df.columns if col in db_columns]
+        
+        if not valid_columns:
+            st.error(f"No matching columns found for {table_name}")
+            return
+            
+        # Insert data
+        values = df[valid_columns].values.tolist()
+        insert_query = f"INSERT INTO {table_name} ({','.join(valid_columns)}) VALUES %s"
         execute_values(cursor, insert_query, values)
         conn.commit()
-        st.success(f"{table_name} updated.")
+        st.success(f"{table_name} updated with {len(df)} records.")
     except Exception as e:
         st.error(f"Failed to update {table_name}: {e}")
         conn.rollback()
@@ -83,51 +190,109 @@ def load_gtfs_data(force_refresh=False):
 
     brisbane_tz = pytz.timezone("Australia/Brisbane")
     now = datetime.now(brisbane_tz)
-    refresh_time = datetime.combine(now.date(), time(1, 0), tzinfo=brisbane_tz)
+    
+    # Set refresh time to 1 AM
+    refresh_time = datetime.combine(now.date(), time(1, 0)).replace(tzinfo=brisbane_tz)
 
-    if force_refresh or st.session_state.last_refresh is None or (now > refresh_time and st.session_state.last_refresh < refresh_time):
-        zip_obj = download_gtfs()
-        if not zip_obj:
-            return
+    # Create tables first
+    create_tables_if_not_exist()
 
-        routes_df = extract_file(zip_obj, "routes.txt")
-        stops_df = extract_file(zip_obj, "stops.txt")
-        trips_df = extract_file(zip_obj, "trips.txt")
-        stop_times_df = extract_file(zip_obj, "stop_times.txt")
-        shapes_df = extract_file(zip_obj, "shapes.txt")
+    if force_refresh or st.session_state.last_refresh is None or (now > refresh_time and (st.session_state.last_refresh is None or st.session_state.last_refresh < refresh_time)):
+        with st.spinner("Downloading and processing GTFS data..."):
+            zip_obj = download_gtfs()
+            if not zip_obj:
+                return
 
-        stops_df["stop_lat"] = stops_df["stop_lat"].astype(float)
-        stops_df["stop_lon"] = stops_df["stop_lon"].astype(float)
-        stops_df["region"] = stops_df.apply(lambda row: classify_region(row["stop_lat"], row["stop_lon"]), axis=1)
+            # Extract data files
+            routes_df = extract_file(zip_obj, "routes.txt")
+            stops_df = extract_file(zip_obj, "stops.txt")
+            trips_df = extract_file(zip_obj, "trips.txt")
+            stop_times_df = extract_file(zip_obj, "stop_times.txt")
+            shapes_df = extract_file(zip_obj, "shapes.txt")
 
-        store_to_postgres("gtfs_routes", routes_df)
-        store_to_postgres("gtfs_stops", stops_df)
-        store_to_postgres("gtfs_trips", trips_df)
-        store_to_postgres("gtfs_stop_times", stop_times_df)
-        store_to_postgres("gtfs_shapes", shapes_df)
+            # Process stops data to add region
+            if not stops_df.empty and 'stop_lat' in stops_df.columns and 'stop_lon' in stops_df.columns:
+                # Apply region classification
+                stops_df["region"] = stops_df.apply(
+                    lambda row: classify_region(row["stop_lat"], row["stop_lon"]), 
+                    axis=1
+                )
 
-        st.session_state.last_refresh = now
+            # Store data to PostgreSQL
+            store_to_postgres("gtfs_routes", routes_df)
+            store_to_postgres("gtfs_stops", stops_df)
+            store_to_postgres("gtfs_trips", trips_df)
+            store_to_postgres("gtfs_stop_times", stop_times_df)
+            store_to_postgres("gtfs_shapes", shapes_df)
+
+            st.session_state.last_refresh = now
     else:
-        st.info("GTFS data already refreshed today.")
+        st.info(f"GTFS data already refreshed today at {st.session_state.last_refresh.strftime('%Y-%m-%d %H:%M:%S')}.")
+
+def check_table_exists(table_name):
+    conn = get_pg_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(f"""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables 
+                WHERE table_name = '{table_name}'
+            );
+        """)
+        exists = cursor.fetchone()[0]
+        return exists
+    except Exception as e:
+        st.error(f"Error checking if table exists: {e}")
+        return False
+    finally:
+        cursor.close()
+        conn.close()
 
 def show_preview_from_postgres(table_name):
+    if not check_table_exists(table_name):
+        st.warning(f"Table {table_name} does not exist yet. Please run the data loader first.")
+        return
+        
     try:
         conn = get_pg_connection()
-        df = pd.read_sql(f"SELECT * FROM {table_name} LIMIT 5", conn)
+        query = f"SELECT * FROM {table_name} LIMIT 5"
+        df = pd.read_sql(query, conn)
         conn.close()
-        st.subheader(f"{table_name} (latest 5 rows)")
-        st.dataframe(df)
+        
+        if df.empty:
+            st.info(f"No data in {table_name}")
+        else:
+            st.subheader(f"{table_name} (latest 5 rows)")
+            st.dataframe(df)
+            
+            # Show record count
+            conn = get_pg_connection()
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+            count = cursor.fetchone()[0]
+            conn.close()
+            st.text(f"Total records: {count}")
     except Exception as e:
         st.error(f"Error fetching preview from {table_name}: {e}")
 
 # --- Streamlit App ---
 st.title("GTFS Data Loader")
+st.write("This app downloads and loads TransLink GTFS data into PostgreSQL database.")
 
-if st.button("Download Now"):
-    load_gtfs_data(force_refresh=True)
-else:
-    load_gtfs_data(force_refresh=False)
+col1, col2 = st.columns(2)
+with col1:
+    if st.button("Download & Refresh Now", type="primary"):
+        load_gtfs_data(force_refresh=True)
+with col2:
+    if st.button("Check for Updates"):
+        load_gtfs_data(force_refresh=False)
 
 # --- Show Latest Preview from DB ---
-for table in ["gtfs_routes", "gtfs_stops", "gtfs_trips", "gtfs_stop_times", "gtfs_shapes"]:
-    show_preview_from_postgres(table)
+st.subheader("Database Preview")
+tables = ["gtfs_routes", "gtfs_stops", "gtfs_trips", "gtfs_stop_times", "gtfs_shapes"]
+
+# Use tabs for better organization
+tabs = st.tabs([table.replace("gtfs_", "").capitalize() for table in tables])
+for i, tab in enumerate(tabs):
+    with tab:
+        show_preview_from_postgres(tables[i])
