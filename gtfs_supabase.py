@@ -14,14 +14,8 @@ SUPABASE_URL = st.secrets.get("SUPABASE_DATABASE_URL")
 GTFS_ZIP_URL = "https://www.data.qld.gov.au/dataset/general-transit-feed-specification-gtfs-translink/resource/e43b6b9f-fc2b-4630-a7c9-86dd5483552b/download"
 
 def get_pg_connection():
-    return psycopg2.connect(
-        host=PG_HOST,
-        port=PG_PORT,
-        dbname=PG_DB,
-        user=PG_USER,
-        password=PG_PASSWORD,
-        sslmode="require"
-    )
+    return  psycopg2.connect(SUPABASE_URL)
+    
 
 def download_gtfs():
     try:
