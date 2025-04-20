@@ -2,25 +2,29 @@ import streamlit as st
 import psycopg2
 import traceback
 import time
+import os
+from urllib.parse import urlparse
 
-# --- Supabase PostgreSQL Credentials ---
-PG_HOST = "eegejlqdgahlmtjniupz.supabase.co"
-PG_PORT = 5432
-PG_DB = "postgres"
-PG_USER = "postgres"
-PG_PASSWORD = "Supa1base!"  # Replace with your actual password
+# --- Supabase Connection Options ---
+# Option 1: Connection URL with service role (preferred)
+# SUPABASE_URL = "postgresql://postgres.eegejlqdgahlmtjniupz:Supa1base!@aws-0-us-west-1.pooler.supabase.com:5432/postgres"
+# Note: Replace the password in the URL with your actual service role key or use environment variables
+
+# Option 2: Connection string with service role from environment variables
+SUPABASE_URL = os.environ.get("SUPABASE_DATABASE_URL", "")
 
 # --- Function to get connection with timeout ---
 def get_pg_connection(timeout=5):
-    st.info(f"Attempting to connect to {PG_HOST}...")
+    st.info(f"Attempting to connect to Supabase database...")
     try:
+        # Parse the connection URL to display host without sensitive info
+        parsed_url = urlparse(SUPABASE_URL)
+        display_host = f"{parsed_url.scheme}://{parsed_url.username}@{parsed_url.hostname}"
+        st.info(f"Connecting to {display_host}...")
+        
+        # Connect using the connection URL
         conn = psycopg2.connect(
-            host=PG_HOST,
-            port=PG_PORT,
-            dbname=PG_DB,
-            user=PG_USER,
-            password=PG_PASSWORD,
-            sslmode="require",
+            SUPABASE_URL,
             connect_timeout=timeout
         )
         return conn
@@ -92,12 +96,17 @@ elif st.session_state.connection_status == "error":
 
 # Show connection information
 with st.expander("Connection Details"):
-    st.write(f"**Host:** {PG_HOST}")
-    st.write(f"**Port:** {PG_PORT}")
-    st.write(f"**Database:** {PG_DB}")
-    st.write(f"**User:** {PG_USER}")
-    st.write("**Password:** ********")
-    st.write(f"**SSL Mode:** require")
+    # Parse and display connection info from URL
+    try:
+        parsed_url = urlparse(SUPABASE_URL)
+        st.write(f"**Connection Type:** URL-based with Service Role")
+        st.write(f"**Host:** {parsed_url.hostname}")
+        st.write(f"**Port:** {parsed_url.port or 5432}")
+        st.write(f"**Database:** {parsed_url.path.strip('/')}")
+        st.write(f"**User:** {parsed_url.username}")
+        st.write("**Password:** ********")
+    except Exception:
+        st.write("Error parsing connection URL")
     
     # Show current status
     if st.session_state.connection_status is not None:
@@ -109,9 +118,62 @@ with st.expander("Connection Details"):
 st.subheader("Troubleshooting Tips")
 st.markdown("""
 If the connection fails, check the following:
-1. **Network Connectivity**: Make sure your network allows connections to the database host
-2. **Credentials**: Verify your username and password are correct
-3. **IP Restrictions**: Check if your database has IP restrictions enabled
-4. **Firewall Rules**: Ensure your firewall allows outgoing connections to port 5432
-5. **SSL Requirements**: Some databases require SSL connections
+1. **Service Role API Key**: Make sure you're using the correct service role API key (not the anon public key)
+2. **Connection URL Format**: Verify your connection URL is formatted correctly
+3. **Network Connectivity**: Ensure your network allows connections to the Supabase database
+4. **IP Restrictions**: Check if your database has IP allow lists enabled in the Supabase dashboard
+5. **Environment Variables**: If using environment variables, confirm they're properly set
+6. **SSL Requirements**: Supabase requires SSL connections (this is handled automatically in the connection URL)
+
+**For Supabase Service Roles:**
+- Service roles have higher privileges than anonymous access
+- Service role keys should be kept secure and not exposed in client-side code
+- Consider storing the service role key in environment variables
 """)
+
+# Add a section for environment variable setup
+with st.expander("Using Environment Variables (Recommended)"):
+    st.markdown("""
+    For better security, store your connection URL in environment variables:
+    
+    **Local Development:**
+    ```bash
+    # Linux/MacOS
+    export SUPABASE_DATABASE_URL="postgresql://postgres.yourprojectref:yourpassword@aws-0-region.pooler.supabase.com:5432/postgres"
+    
+    # Windows (Command Prompt)
+    set SUPABASE_DATABASE_URL=postgresql://postgres.yourprojectref:yourpassword@aws-0-region.pooler.supabase.com:5432/postgres
+    
+    # Windows (PowerShell)
+    $env:SUPABASE_DATABASE_URL="postgresql://postgres.yourprojectref:yourpassword@aws-0-region.pooler.supabase.com:5432/postgres"
+    ```
+    
+    **Streamlit Cloud:**
+    Add the environment variable in your app settings.
+    
+    **Code Changes:**
+    ```python
+    import os
+    SUPABASE_URL = os.environ.get("SUPABASE_DATABASE_URL", "")
+    ```
+    """)
+
+# Add a section explaining how to get the connection URL from Supabase
+with st.expander("How to get your Supabase Connection URL"):
+    st.markdown("""
+    To find your Supabase connection URL with service role privileges:
+
+    1. Log in to your Supabase dashboard
+    2. Select your project
+    3. Go to Project Settings > Database
+    4. Look for "Connection string" or "URI" section
+    5. Choose "URI" format and select "Service role" (not the public anon key)
+    6. Copy the entire connection string
+    
+    Example format:
+    ```
+    postgresql://postgres.[project-ref]:[service-role-password]@aws-0-[region].pooler.supabase.com:5432/postgres
+    ```
+    
+    Note: Using the pooler URL (with aws-0-region.pooler.supabase.com) is recommended for better connection management.
+    """)
