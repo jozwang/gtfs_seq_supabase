@@ -109,9 +109,6 @@ def load_gtfs_data(force_refresh=False):
     # Set refresh time to 1 AM
     refresh_time = datetime.combine(now.date(), time(1, 0)).replace(tzinfo=brisbane_tz)
 
-    # Create tables first
-    create_tables_if_not_exist()
-
     if force_refresh or st.session_state.last_refresh is None or (now > refresh_time and (st.session_state.last_refresh is None or st.session_state.last_refresh < refresh_time)):
         # Create a progress bar
         progress_bar = st.progress(0)
@@ -164,8 +161,8 @@ def load_gtfs_data(force_refresh=False):
         store_to_postgres("gtfs_trips", trips_df)
         progress_bar.progress(85)
         
-        store_to_postgres("gtfs_stop_times", stop_times_df)
-        progress_bar.progress(95)
+        #store_to_postgres("gtfs_stop_times", stop_times_df)
+       # progress_bar.progress(95)
         
         store_to_postgres("gtfs_shapes", shapes_df)
         progress_bar.progress(100)
