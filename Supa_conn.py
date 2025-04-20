@@ -11,7 +11,8 @@ from urllib.parse import urlparse
 # Note: Replace the password in the URL with your actual service role key or use environment variables
 
 # Option 2: Connection string with service role from environment variables
-SUPABASE_URL = os.environ.get("SUPABASE_DATABASE_URL", "")
+SUPABASE_URL = st.secrets.get("SUPABASE_DATABASE_URL")
+#os.environ.get("SUPABASE_DATABASE_URL", "")
 
 # --- Function to get connection with timeout ---
 def get_pg_connection(timeout=5):
