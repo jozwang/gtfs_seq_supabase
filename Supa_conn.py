@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 # Option 2: Connection string with service role from environment variables
 #SUPABASE_URL = st.secrets.get("SUPABASE_DATABASE_URL")
 #os.environ.get("SUPABASE_DATABASE_URL", "")
-SUPABASE_URL = "postgresql://postgres:Supa1base!gtfs@eegejlqdgahlmtjniupz.supabase.co:5432/postgres
+SUPABASE_URL = "postgresql://postgres:Supa1base!gtfs@eegejlqdgahlmtjniupz.supabase.co:5432/postgres"
 
 # --- Function to get connection with timeout ---
 def get_pg_connection(timeout=5):
