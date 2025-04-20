@@ -11,7 +11,7 @@ from psycopg2.extras import execute_values
 # --- PostgreSQL Connection ---
 PG_HOST = "eegejlqdgahlmtjniupz.supabase.co"
 PG_PORT = 5432
-PG_DB = "postgres"
+PG_DB = "GTFS"
 PG_USER = "postgres"
 PG_PASSWORD = "Supa1base!gtfs"  # Enter your actual DB password here
 
