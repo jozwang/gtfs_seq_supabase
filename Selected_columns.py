@@ -82,66 +82,45 @@ def store_dataframe_to_db(df, table_name, conn):
         st.warning(f"Skipping empty DataFrame for table {table_name}")
         return
 
-    # Get column names from database table
     db_columns = get_table_columns(table_name, conn)
-    
     if not db_columns:
         st.error(f"Could not retrieve columns for {table_name}")
         return
-    
-    # Match columns between DataFrame and database table
-    common_columns = [col for col in df.columns if col in db_columns]
-    
-    if not common_columns:
-        st.error(f"No matching columns found between GTFS file and {table_name}")
-        st.write("GTFS file columns:", df.columns.tolist())
-        st.write("Database table columns:", db_columns)
-        return
-    
+
+    # Truncate the table before inserting
     truncate_table(table_name, conn)
-    
-    # Create a new DataFrame with all database columns
-    # This will include NULL values for columns not in the original GTFS file
-    new_df = pd.DataFrame(columns=db_columns)
-    
-    # Copy data from original DataFrame for common columns
-    for col in common_columns:
-        new_df[col] = df[col]
-    
-    # Missing columns will be NULL in the new DataFrame
-    missing_columns = set(db_columns) - set(common_columns)
+
+    # Identify which columns are missing from the GTFS DataFrame
+    missing_columns = set(db_columns) - set(df.columns)
     if missing_columns:
-        st.info(f"The following columns will use default db values in {table_name}: {missing_columns}")
+        st.info(f"Skipping these missing columns (defaulted in DB): {missing_columns}")
 
-    # Skip special columns so DB can use defaults like NOW()
-    columns_to_skip = {"id", "created_at", "updated_at"}
-    insert_columns = [col for col in db_columns if col not in columns_to_skip and col in df.columns]
+    # Use only the available columns for insert
+    insert_columns = [col for col in db_columns if col not in missing_columns]
 
-# Build insert DataFrame only for the matched columns
+    # Prepare insert DataFrame with only matching columns
     insert_df = df[insert_columns].copy()
 
-# Replace NaN with None to prevent SQL errors
+    # Replace NaN with None for SQL compatibility
     insert_df = insert_df.where(pd.notnull(insert_df), None)
 
-# Convert to list of tuples for SQL insert
+    # Convert to list of tuples
     values = insert_df.values.tolist()
 
-    # Create INSERT query using only columns that exist in new_df
-    #insert_columns = list(new_df.columns)
+    # Build SQL insert statement
     insert_query = f"""
         INSERT INTO {table_name} ({', '.join(insert_columns)})
         VALUES %s
     """
-    
+
     try:
         with conn.cursor() as cur:
             execute_values(cur, insert_query, values)
             conn.commit()
-        st.success(f"Inserted {len(values)} rows into {table_name} using {len(insert_columns)} columns")
-
+        st.success(f"Inserted {len(values)} rows into {table_name}")
+        st.success(f"({len(insert_columns)} columns inserted, {len(missing_columns)} defaulted in DB)")
     except Exception as e:
         st.error(f"Failed to insert into {table_name}: {e}")
-        st.error(f"Error details: {str(e)}")
 
 def preview_supabase_tables(conn, table_names):
     for table in table_names:
