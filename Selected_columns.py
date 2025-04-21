@@ -115,10 +115,11 @@ def store_dataframe_to_db(df, table_name, conn):
     
     # Convert to list of tuples for insertion
     values = new_df.values.tolist()
-    
-    # Create INSERT query with all database columns
+
+    # Create INSERT query using only columns that exist in new_df
+    insert_columns = list(new_df.columns)
     insert_query = f"""
-        INSERT INTO {table_name} ({', '.join(db_columns)})
+        INSERT INTO {table_name} ({', '.join(insert_columns)})
         VALUES %s
     """
     
