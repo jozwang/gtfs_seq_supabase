@@ -111,7 +111,7 @@ def store_dataframe_to_db(df, table_name, conn):
     # Missing columns will be NULL in the new DataFrame
     missing_columns = set(db_columns) - set(common_columns)
     if missing_columns:
-        st.info(f"The following columns will have NULL values in {table_name}: {missing_columns}")
+        st.info(f"The following columns will use default db values in {table_name}: {missing_columns}")
 
     # Skip special columns so DB can use defaults like NOW()
     columns_to_skip = {"id", "created_at", "updated_at"}
