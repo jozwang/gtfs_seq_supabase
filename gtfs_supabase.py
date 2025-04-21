@@ -7,6 +7,7 @@ from datetime import datetime, time
 import pytz
 import psycopg2
 from psycopg2.extras import execute_values
+import time as time_module  # Renamed to avoid conflict with datetime.time
 
 # --- PostgreSQL Connection ---
 SUPABASE_URL = st.secrets.get("SUPABASE_URL")
@@ -63,8 +64,6 @@ def classify_region(lat, lon):
     except (ValueError, TypeError):
         return "Unknown"
 
-
-
 def store_to_postgres(table_name, df):
     if df.empty:
         st.warning(f"No data to store in {table_name}")
@@ -99,7 +98,73 @@ def store_to_postgres(table_name, df):
         cursor.close()
         conn.close()
 
-def load_gtfs_data(force_refresh=False):
+def load_specific_gtfs_table(table_name):
+    """
+    Load and update a specific GTFS table
+    """
+    # Create a progress bar
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    # Step 1: Download GTFS data (30%)
+    status_text.text(f"Downloading GTFS data for {table_name}...")
+    zip_obj = download_gtfs()
+    if not zip_obj:
+        progress_bar.empty()
+        status_text.empty()
+        return
+    progress_bar.progress(30)
+    
+    # Step 2: Extract specific data file (60%)
+    status_text.text(f"Extracting {table_name} data...")
+    
+    # Map table name to corresponding file
+    file_mapping = {
+        "gtfs_routes": "routes.txt",
+        "gtfs_stops": "stops.txt",
+        "gtfs_trips": "trips.txt",
+        "gtfs_stop_times": "stop_times.txt",
+        "gtfs_shapes": "shapes.txt"
+    }
+    
+    if table_name not in file_mapping:
+        st.error(f"Unknown table: {table_name}")
+        progress_bar.empty()
+        status_text.empty()
+        return
+        
+    file_name = file_mapping[table_name]
+    df = extract_file(zip_obj, file_name)
+    
+    # Special processing for stops table
+    if table_name == "gtfs_stops" and not df.empty and 'stop_lat' in df.columns and 'stop_lon' in df.columns:
+        # Apply region classification
+        df["region"] = df.apply(
+            lambda row: classify_region(row["stop_lat"], row["stop_lon"]), 
+            axis=1
+        )
+    
+    progress_bar.progress(60)
+    
+    # Step 3: Store data to PostgreSQL (100%)
+    status_text.text(f"Storing {table_name} data to PostgreSQL...")
+    store_to_postgres(table_name, df)
+    progress_bar.progress(100)
+    
+    # Display completion message
+    status_text.text(f"{table_name} update completed successfully!")
+    
+    # Clear progress bar after 3 seconds
+    time_module.sleep(3)
+    progress_bar.empty()
+    status_text.empty()
+    
+    # Show success message
+    brisbane_tz = pytz.timezone("Australia/Brisbane")
+    now = datetime.now(brisbane_tz)
+    st.success(f"{table_name} successfully updated at {now.strftime('%Y-%m-%d %H:%M:%S')}")
+
+def load_all_gtfs_data(force_refresh=False):
     if "last_refresh" not in st.session_state:
         st.session_state.last_refresh = None
 
@@ -161,8 +226,9 @@ def load_gtfs_data(force_refresh=False):
         store_to_postgres("gtfs_trips", trips_df)
         progress_bar.progress(85)
         
-        #store_to_postgres("gtfs_stop_times", stop_times_df)
-       # progress_bar.progress(95)
+        # Uncommented this line to restore stop_times loading
+        store_to_postgres("gtfs_stop_times", stop_times_df)
+        progress_bar.progress(95)
         
         store_to_postgres("gtfs_shapes", shapes_df)
         progress_bar.progress(100)
@@ -174,7 +240,7 @@ def load_gtfs_data(force_refresh=False):
         status_text.text("Data refresh completed successfully!")
         
         # Clear progress bar after 3 seconds
-        time.sleep(3)
+        time_module.sleep(3)
         progress_bar.empty()
         status_text.empty()
         
@@ -233,20 +299,41 @@ def show_preview_from_postgres(table_name):
 st.title("GTFS Data Loader")
 st.write("This app downloads and loads TransLink GTFS data into PostgreSQL database.")
 
-col1, col2 = st.columns(2)
-with col1:
-    if st.button("Download & Refresh Now", type="primary"):
-        load_gtfs_data(force_refresh=True)
-with col2:
-    if st.button("Check for Updates"):
-        load_gtfs_data(force_refresh=False)
-
-# --- Show Latest Preview from DB ---
-st.subheader("Database Preview")
+# Define available tables
 tables = ["gtfs_routes", "gtfs_stops", "gtfs_trips", "gtfs_stop_times", "gtfs_shapes"]
 
-# Use tabs for better organization
-tabs = st.tabs([table.replace("gtfs_", "").capitalize() for table in tables])
-for i, tab in enumerate(tabs):
-    with tab:
-        show_preview_from_postgres(tables[i])
+# Create tabs for different functionalities
+tab1, tab2 = st.tabs(["Update Tables", "View Data"])
+
+with tab1:
+    st.subheader("Update GTFS Data")
+    
+    # Option 1: Update all tables
+    st.markdown("### Option 1: Update All Tables")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Download & Refresh All", type="primary"):
+            load_all_gtfs_data(force_refresh=True)
+    with col2:
+        if st.button("Check for Updates (All)"):
+            load_all_gtfs_data(force_refresh=False)
+    
+    # Option 2: Update specific table
+    st.markdown("### Option 2: Update Specific Table")
+    selected_table = st.selectbox(
+        "Select table to update:",
+        tables,
+        format_func=lambda x: x.replace("gtfs_", "").capitalize()
+    )
+    
+    if st.button(f"Update {selected_table.replace('gtfs_', '').capitalize()} Only", type="primary"):
+        load_specific_gtfs_table(selected_table)
+
+with tab2:
+    st.subheader("Database Preview")
+    
+    # Use tabs for better organization
+    preview_tabs = st.tabs([table.replace("gtfs_", "").capitalize() for table in tables])
+    for i, tab in enumerate(preview_tabs):
+        with tab:
+            show_preview_from_postgres(tables[i])
