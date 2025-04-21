@@ -115,9 +115,12 @@ def store_dataframe_to_db(df, table_name, conn):
     
     # Convert to list of tuples for insertion
     values = new_df.values.tolist()
-
+    # Remove created_at and updated_at so they get default NOW()
+    columns_to_skip = {"id","created_at", "updated_at"}
+    insert_columns = [col for col in db_columns if col not in columns_to_skip and col in df.columns]
+    
     # Create INSERT query using only columns that exist in new_df
-    insert_columns = list(new_df.columns)
+    #insert_columns = list(new_df.columns)
     insert_query = f"""
         INSERT INTO {table_name} ({', '.join(insert_columns)})
         VALUES %s
