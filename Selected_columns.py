@@ -138,8 +138,7 @@ def store_dataframe_to_db(df, table_name, conn):
             execute_values(cur, insert_query, values)
             conn.commit()
         st.success(f"Inserted {len(values)} rows into {table_name} using {len(insert_columns)} columns")
-        
-        st.success(f"({len(common_columns)} columns with data, {len(missing_columns)} columns with NULL values)")
+
     except Exception as e:
         st.error(f"Failed to insert into {table_name}: {e}")
         st.error(f"Error details: {str(e)}")
