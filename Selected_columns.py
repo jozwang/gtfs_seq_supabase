@@ -262,10 +262,10 @@ def main():
                             st.write(f"- GTFS columns: {len(df.columns)}")
                             st.write(f"- Database columns: {len(db_columns)}")
                             st.write(f"- Matched columns: {len(common_cols)}")
-                            st.write(f"- Columns with NULL values: {len(missing_cols)}")
+                            st.write(f"- Missing Columns: {len(missing_cols)}")
                             
                             if missing_cols:
-                                st.write("**Columns that will be NULL:**", list(missing_cols))
+                                st.write("**Columns that are not in db:**", list(missing_cols))
                     
                 # Add confirmation button
                 if st.button("Confirm and Upload to Database"):
