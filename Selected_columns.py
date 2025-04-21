@@ -112,13 +112,20 @@ def store_dataframe_to_db(df, table_name, conn):
     missing_columns = set(db_columns) - set(common_columns)
     if missing_columns:
         st.info(f"The following columns will have NULL values in {table_name}: {missing_columns}")
-    
-    # Convert to list of tuples for insertion
-    values = new_df.values.tolist()
-    # Remove created_at and updated_at so they get default NOW()
-    columns_to_skip = {"id","created_at", "updated_at"}
+
+    # Skip special columns so DB can use defaults like NOW()
+    columns_to_skip = {"id", "created_at", "updated_at"}
     insert_columns = [col for col in db_columns if col not in columns_to_skip and col in df.columns]
-    
+
+# Build insert DataFrame only for the matched columns
+    insert_df = df[insert_columns].copy()
+
+# Replace NaN with None to prevent SQL errors
+    insert_df = insert_df.where(pd.notnull(insert_df), None)
+
+# Convert to list of tuples for SQL insert
+    values = insert_df.values.tolist()
+
     # Create INSERT query using only columns that exist in new_df
     #insert_columns = list(new_df.columns)
     insert_query = f"""
@@ -130,7 +137,8 @@ def store_dataframe_to_db(df, table_name, conn):
         with conn.cursor() as cur:
             execute_values(cur, insert_query, values)
             conn.commit()
-        st.success(f"Inserted {len(values)} rows into {table_name} using all {len(db_columns)} columns")
+        st.success(f"Inserted {len(values)} rows into {table_name} using {len(insert_columns)} columns")
+        
         st.success(f"({len(common_columns)} columns with data, {len(missing_columns)} columns with NULL values)")
     except Exception as e:
         st.error(f"Failed to insert into {table_name}: {e}")
